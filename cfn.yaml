@@ -26,7 +26,7 @@ Resources:
   LambdaBackupsRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: Lambda-Backups-Role
+      RoleName: !Join ['-', ['Lambda-Backups-Role', !Ref "AWS::Region"]]
       Path: /
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
