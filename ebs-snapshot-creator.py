@@ -46,11 +46,16 @@ def lambda_handler(event, context):
     # Determine When We're Going To Delete This SnapShot
     delete_date = datetime.date.today() + datetime.timedelta(days=retention_days)
     delete_fmt = delete_date.strftime('%Y-%m-%d')
+    create_date = datetime.date.today()
+    create_fmt = create_date.strftime('%Y-%m-%d')
 
     # Set Default SnapShot Tags
     snapshot_tags = [
+	  { 'Key': 'CreatedOn', 'Value': create_fmt },        
       { 'Key': 'DeleteOn', 'Value': delete_fmt },
       { 'Key': 'Type', 'Value': 'Automated' },
+      { 'Key': 'InstanceID', 'Value': instance['InstanceId'] },
+	  { 'Key': 'InstanceName', 'Value': instance_name },      
     ]
 
     # If We Want To Offsite This SnapShot, Set The Appropriate Tag
@@ -80,6 +85,10 @@ def lambda_handler(event, context):
         vol_id, 
         dev_name 
       )     
+        
+      snapshot_tags = snapshot_tags + [{ 'Key': 'Name', 'Value': description }]
+      snapshot_tags = snapshot_tags + [{ 'Key': 'VolumeID', 'Value': vol_id }]
+      snapshot_tags = snapshot_tags + [{ 'Key': 'DeviceName', 'Value': dev_name }]	
       
       if 'Tags' in volume:
         for tag in volume['Tags']:
