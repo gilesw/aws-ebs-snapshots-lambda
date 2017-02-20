@@ -1,6 +1,12 @@
 # Change Log
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## 0.0.6 - 2017-02-17
+### Added
+- All snapshots are now tagged with Creation Date, Device ID, Instance ID, Instance Name, Volume ID
+- Removed all comments from YAML CFN for 'ebs-snapshot-creator' function to keep it within the 4096 character size limit for a zip file
+
+
 ## 0.0.5 - 2017-01-27
 ### Added
 - Created new function to offsite SnapShots based upon presence of 'DestinationRegion' Tag
