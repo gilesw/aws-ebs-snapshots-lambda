@@ -14,7 +14,7 @@ def lambda_handler(event, context):
 	snapshots = ec.describe_snapshots(
 		Filters=[
 			{ 'Name': 'tag-key', 'Values': ['DestinationRegion'] },
-            { 'Name': 'status', 'Values': ['completed'] },
+						{ 'Name': 'status', 'Values': ['completed'] },
 		]
 	)
 
@@ -30,15 +30,15 @@ def lambda_handler(event, context):
 			if tag['Key'] == 'DestinationRegion':
 				destination_region = tag['Value']
 
-			# Check If We Need To Do A Copy Or Not
-			if destination_region == aws_region:
+		# Check If We Need To Do A Copy Or Not
+		if destination_region == aws_region:
 
-				print "\tDestination Region %s is the same as current region (%s) - skipping copy" % (
-					destination_region,
-					aws_region
-				)
+			print "\tDestination Region %s is the same as current region (%s) - skipping copy" % (
+				destination_region,
+				aws_region
+			)
 
-				continue
+			continue
 
 		# Construct ec2 Client For Secondary Region
 		secondary_ec = boto3.client('ec2', region_name=destination_region)
@@ -61,11 +61,11 @@ def lambda_handler(event, context):
 					destination_region
 				)
 				
-				continue					
+				continue          
 
 			print "\t\tFound a corresponding Snapshot with Id %s in %s created from Snapshot %s" % (
 				os_snapshots['Snapshots'][0]['SnapshotId'],
-				destination_region,				
+				destination_region,       
 				snapshot['SnapshotId']
 			)
 
@@ -80,6 +80,12 @@ def lambda_handler(event, context):
 
 			continue
 
+
+		print "\t\tCreating destination copy in %s of %s from %s" % (
+				destination_region,
+				snapshot['SnapshotId'],
+				aws_region
+		)
 		# Create Copy Of Snapshot Because One Doesn't Exist
 		os_snapshot = secondary_ec.copy_snapshot(
 			SourceRegion=aws_region,
@@ -90,19 +96,12 @@ def lambda_handler(event, context):
 
 		# If Snapshot Copy Executed Successfully, Copy The Tags
 		if (os_snapshot):
-
-			print "\t\tSnapshot copy %s created in %s of %s from %s" % (
-				os_snapshot['SnapshotId'],
-				destination_region,
-				snapshot['SnapshotId'],
-				aws_region
-			)
-
+			print "\t\tCopy started successfully"
 			# Add Tags To Off-Site SnapShot
 			destination_snapshot_tags = snapshot['Tags'] + [{ 'Key': 'SourceSnapshotId', 'Value': snapshot['SnapshotId'] }]
 			secondary_ec.create_tags(
 				Resources=[os_snapshot['SnapshotId']],
-				Tags=destination_snapshot_tags					
+				Tags=destination_snapshot_tags          
 			)
 
 			# Add Tags To Source SnapShot
@@ -112,3 +111,5 @@ def lambda_handler(event, context):
 					{ 'Key': 'OffsiteSnapshotId', 'Value': os_snapshot['SnapshotId'] },
 				]
 			)
+		else:
+			print "\t\tCopy did not start successfully"
