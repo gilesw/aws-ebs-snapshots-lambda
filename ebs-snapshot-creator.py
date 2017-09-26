@@ -6,10 +6,10 @@ import os
 ec = boto3.client('ec2')
 
 def lambda_handler(event, context):
-  
+
   # Get Current Region
-  aws_region = os.getenv('AWS_REGION')  
-  
+  aws_region = os.getenv('AWS_REGION')
+
   # Determine Which Instances To SnapShot
   instances = ec.describe_instances(
     Filters=[
@@ -18,7 +18,7 @@ def lambda_handler(event, context):
   ).get(
     'Reservations', []
   )
-  
+
   print "Found %d instances that need backing up" % len(instances)
 
   # Iterate Over Each Instance & SnapShot Volumes Not Explicitly Excluded From Backups
@@ -30,6 +30,7 @@ def lambda_handler(event, context):
     # Determine Retention Period Based Upon Tags
     retention_days = 7
     destination_region = None
+    copy_region = None
     instance_name = ""
     for tag in instance['Tags']:
       if tag['Key'] == 'RetentionDays' and tag['Value'] > 0:
@@ -51,11 +52,11 @@ def lambda_handler(event, context):
 
     # Set Default SnapShot Tags
     snapshot_tags = [
-	  { 'Key': 'CreatedOn', 'Value': create_fmt },        
+	  { 'Key': 'CreatedOn', 'Value': create_fmt },
       { 'Key': 'DeleteOn', 'Value': delete_fmt },
       { 'Key': 'Type', 'Value': 'Automated' },
       { 'Key': 'InstanceID', 'Value': instance['InstanceId'] },
-	  { 'Key': 'InstanceName', 'Value': instance_name },      
+	  { 'Key': 'InstanceName', 'Value': instance_name },
     ]
 
     # If We Want To Offsite This SnapShot, Set The Appropriate Tag
@@ -64,77 +65,80 @@ def lambda_handler(event, context):
 
     # List All Volumes Attached To The Instance
     for dev in instance['BlockDeviceMappings']:
-      
+
       # Set Variable Defaults
       snapshot_required = True
       volume_name = None
-      
+
       if dev.get('Ebs', None) is None:
         continue
       vol_id = dev['Ebs']['VolumeId']
       dev_name = dev['DeviceName']
-      
+
       # Get a Volume Object Based Upon Volume ID
       volume = ec.describe_volumes(
         VolumeIds=[vol_id,]
-      )['Volumes'][0]         
+      )['Volumes'][0]
 
       # Set Default SnapShot Description
-      description = '%s - %s (%s)' % ( 
-        instance_name, 
-        vol_id, 
-        dev_name 
-      )     
-        
+      description = '%s - %s (%s)' % (
+        instance_name,
+        vol_id,
+        dev_name
+      )
+
       snapshot_tags = snapshot_tags + [{ 'Key': 'Name', 'Value': description }]
       snapshot_tags = snapshot_tags + [{ 'Key': 'VolumeID', 'Value': vol_id }]
-      snapshot_tags = snapshot_tags + [{ 'Key': 'DeviceName', 'Value': dev_name }]	
-      
+      snapshot_tags = snapshot_tags + [{ 'Key': 'DeviceName', 'Value': dev_name }]
+
       if 'Tags' in volume:
         for tag in volume['Tags']:
-          
+
           # Determine If Volume Has 'Backup' Flag Set To 'No' & Exclude From SnapShot If It Does
           if tag['Key'] == 'Backup' and tag['Value'] == 'No':
-            snapshot_required = False            
-          
+            snapshot_required = False
+
           # Override Default Description With Volume Name If One Specified
           if tag['Key'] == 'Name':
             description = tag['Value']
 
-            
+          if tag['Key'] == 'CopyRegion' and tag['Value'] != '':
+            copy_region = tag['Value']
+
+
       # We Don't Want To SnapShot Any Volume Explictly Excluded
       if snapshot_required == False:
         print "\tIgnoring EBS volume %s (%s) on instance %s - 'Backup' Tag set to 'No'" % (
-          vol_id, 
-          dev_name, 
+          vol_id,
+          dev_name,
           instance['InstanceId']
         )
 
         continue
-      
-      
+
+
       print "\tFound EBS volume %s (%s) on instance %s - Proceeding with SnapShot" % (
-        vol_id, 
-        dev_name, 
+        vol_id,
+        dev_name,
         instance['InstanceId']
-      )         
-        
+      )
+
       # Take SnapShot Of Volume
       snap = ec.create_snapshot(
-        VolumeId=vol_id, 
+        VolumeId=vol_id,
         Description=description
       )
-      
+
       if not (snap):
         print "\t\tSnapShot operation failed!"
         continue
 
-      print "\t\tSnapshot %s created in %s of [%s]" % ( 
-        snap['SnapshotId'], 
-        aws_region, 
-        description 
-      )       
-      
+      print "\t\tSnapshot %s created in %s of [%s]" % (
+        snap['SnapshotId'],
+        aws_region,
+        description
+      )
+
       print "\t\tRetaining snapshot %s of volume %s from instance %s (%s) for %d days" % (
         snap['SnapshotId'],
         vol_id,
@@ -148,3 +152,43 @@ def lambda_handler(event, context):
         Resources=[snap['SnapshotId']],
         Tags=snapshot_tags
       )
+
+      # if copy region is specified we copy the newly created snapshot to another region
+      if (copy_region != None):
+
+        print "\t\tCopyRegion set so copying snapshot to %s" % (
+          copy_region
+        )
+
+        # open a client connection to the copy region
+        copy_ec = boto3.client('ec2', region_name=copy_region)
+        copy_snap = copy_ec.copy_snapshot(
+          SourceRegion=aws_region,
+          SourceSnapshotId=snap['SnapshotId'],
+          Description=description,
+          DestinationRegion=copy_region
+        )
+
+        if not (copy_snap):
+          print "\t\tSnapShot operation failed!"
+          continue
+
+        print "\t\tSnapshot %s created in %s of [%s]" % (
+          copy_snap['SnapshotId'],
+          copy_region,
+          description
+        )
+
+        print "\t\tRetaining copy snapshot %s of volume %s from instance %s (%s) for %d days" % (
+          snap['SnapshotId'],
+          vol_id,
+          instance['InstanceId'],
+          instance_name,
+          retention_days,
+        )
+
+        # Tag The SnapShot To Facilitate Later Automated Deletion & Offsiting
+        copy_ec.create_tags(
+          Resources=[copy_snap['SnapshotId']],
+          Tags=snapshot_tags
+        )
